@@ -205,3 +205,12 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Project-specific additions for Prompt Testing Tool
+.env
+.env.local
+results/
+logs/
+*.log
+.streamlit/secrets.toml
+cached_results/
