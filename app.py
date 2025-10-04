@@ -9,7 +9,10 @@ import os
 from dotenv import load_dotenv
 from evaluation import PromptEvaluator
 from loguru import logger
-from utils.ui_helpers import extract_dimension_scores, create_radar_chart, create_bar_chart
+from utils.ui_helpers import (
+    extract_dimension_scores, create_radar_chart, create_bar_chart,
+    create_response_metrics_charts, extract_response_metrics_summary
+)
 import asyncio
 
 load_dotenv()
@@ -439,12 +442,13 @@ def main():
         avg_scores = extract_dimension_scores(filtered_df)
         
         if any(v > 0 for v in avg_scores.values()):
-            # Metric cards
-            sorted_dims = sorted(avg_scores.items(), key=lambda x: x[1], reverse=True)
+            # Metric cards in fixed order
+            fixed_order = ['Helpfulness', 'Directness', 'Critical Thinking', 'Accuracy', 'Tone', 'Safety & Ethics']
             cols = st.columns(6)
             
-            for i, (dim, score) in enumerate(sorted_dims):
+            for i, dim in enumerate(fixed_order):
                 with cols[i]:
+                    score = avg_scores.get(dim, 0)
                     render_metric_card(dim, score)
             
             # Charts
@@ -485,9 +489,51 @@ def main():
             # Missing dimensions info
             missing_dims = [dim for dim in ['Helpfulness', 'Directness', 'Critical Thinking', 'Accuracy', 'Tone', 'Safety & Ethics'] if avg_scores[dim] == 0]
             if missing_dims:
-                st.caption(f"⚠️ Missing data for: {', '.join(missing_dims)}")
+                st.caption(f"Missing data for: {', '.join(missing_dims)}")
             
             st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Response Characteristics Section
+            st.markdown("---")
+            st.markdown("### Response Characteristics")
+            
+            # Get response metrics summary
+            metrics_summary = extract_response_metrics_summary(filtered_df)
+            
+            # Display metrics in columns
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric(
+                    label="Average Word Count",
+                    value=f"{metrics_summary['avg_word_count']:.0f}",
+                    help="Average number of words per response"
+                )
+            
+            with col2:
+                st.metric(
+                    label="Readability Score",
+                    value=f"{metrics_summary['avg_readability']:.1f}",
+                    help="Flesch Reading Ease (0-100, higher = easier to read)"
+                )
+            
+            with col3:
+                st.metric(
+                    label="Grade Level",
+                    value=f"{metrics_summary['avg_grade_level']:.1f}",
+                    help="Flesch-Kincaid Grade Level (reading difficulty)"
+                )
+            
+            # Create and display response metrics charts
+            if len(filtered_df) > 0:
+                word_chart, readability_chart = create_response_metrics_charts(filtered_df, results_df)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.plotly_chart(word_chart, use_container_width=True)
+                
+                with col2:
+                    st.plotly_chart(readability_chart, use_container_width=True)
         else:
             st.info("No evaluation data available")
     
@@ -501,11 +547,11 @@ def main():
         current_prompt_text = current_combination
         matching_df = results_df[results_df['system_prompt'] == current_prompt_text]
         if not matching_df.empty:
-            st.caption(f"📊 Showing {len(matching_df)} results for current prompt selection")
+            st.caption(f"Showing {len(matching_df)} results for current prompt selection")
         else:
-            st.caption(f"📊 No results for this combination. Showing all {len(results_df)} results.")
+            st.caption(f"No results for this combination. Showing all {len(results_df)} results.")
     else:
-        st.caption(f"📊 Showing all {len(results_df)} evaluation results")
+        st.caption(f"Showing all {len(results_df)} evaluation results")
 
 
 # Evaluation Configuration Modal
@@ -545,10 +591,10 @@ if st.session_state.show_eval_config:
         st.markdown("**Batch Size:**")
         batch_size = st.selectbox(
             "Concurrent evaluations per batch:",
-            [10, 20, 30, 50, 100, 150, 200],
-            index=1,  # Default to 20
+            [10, 20, 30, 50, 100, 150, 200, 300, 500],
+            index=6,  # Default to 200
             key="batch_size_select",
-            help="Higher = faster but more API load. Lower = slower but more stable. Max 200 for high throughput."
+            help="Higher = faster but more API load. Lower = slower but more stable. Max 500 for maximum throughput."
         )
         
         # Cost estimation

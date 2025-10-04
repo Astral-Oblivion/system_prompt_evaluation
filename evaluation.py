@@ -10,10 +10,54 @@ from itertools import combinations
 import pandas as pd
 from loguru import logger
 from utils.llm_call import llm_call
+import textstat
 
 # Configure logging for evaluation runs
 logger.add("logs/evaluation.log", rotation="10 MB", retention="30 days",
            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
+
+
+def calculate_response_metrics(response: str) -> Dict[str, Any]:
+    """
+    Calculate objective metrics for a response
+    
+    Args:
+        response: The AI response text to analyze
+        
+    Returns:
+        Dictionary with calculated metrics
+    """
+    if not response or response.strip() == "":
+        return {
+            "word_count": 0,
+            "char_count": 0,
+            "sentence_count": 0,
+            "readability_score": 0,
+            "grade_level": 0
+        }
+    
+    # Basic counts
+    words = response.split()
+    word_count = len(words)
+    char_count = len(response)
+    sentence_count = len([s for s in response.split('.') if s.strip()])
+    
+    # Readability metrics using textstat
+    try:
+        readability_score = textstat.flesch_reading_ease(response)
+        grade_level = textstat.flesch_kincaid_grade(response)
+    except:
+        # Fallback if textstat fails
+        readability_score = 50.0
+        grade_level = 8.0
+    
+    return {
+        "word_count": word_count,
+        "char_count": char_count,
+        "sentence_count": sentence_count,
+        "readability_score": round(readability_score, 1),
+        "grade_level": round(grade_level, 1)
+    }
 
 
 class PromptEvaluator:
@@ -148,6 +192,9 @@ class PromptEvaluator:
                     else:
                         evaluation_score = 50
             
+            # Calculate response metrics
+            metrics = calculate_response_metrics(response)
+            
             result = {
                 "system_prompt": system_prompt,
                 "test_query": test_query,
@@ -155,6 +202,11 @@ class PromptEvaluator:
                 "evaluation_question": evaluation_question,
                 "evaluation_result": evaluation_result,
                 "evaluation_score": evaluation_score,
+                "word_count": metrics["word_count"],
+                "char_count": metrics["char_count"],
+                "sentence_count": metrics["sentence_count"],
+                "readability_score": metrics["readability_score"],
+                "grade_level": metrics["grade_level"],
                 "success": True
             }
             
@@ -171,7 +223,12 @@ class PromptEvaluator:
                 "response": "ERROR: Failed to get response",
                 "evaluation_question": evaluation_question,
                 "evaluation_result": f"ERROR: {str(e)}",
-                "evaluation_score": None,  # Explicitly set to None for failed evaluations
+                "evaluation_score": None,
+                "word_count": 0,
+                "char_count": 0,
+                "sentence_count": 0,
+                "readability_score": 0,
+                "grade_level": 0,
                 "error": str(e),
                 "success": False
             }
@@ -222,7 +279,7 @@ class PromptEvaluator:
         logger.info(f"Executing {len(tasks)} evaluation tasks...")
         
         # For very large numbers of tasks, process in batches to avoid overwhelming the system
-        batch_size = 200  # Maximum concurrent tasks
+        batch_size = 500  # Maximum concurrent tasks
         results = []
         
         for i in range(0, len(tasks), batch_size):
@@ -234,7 +291,7 @@ class PromptEvaluator:
             
             # Small delay between batches to be respectful to the API
             if i + batch_size < len(tasks):
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1)
         
         # Convert to DataFrame
         df = pd.DataFrame([r for r in results if isinstance(r, dict)])

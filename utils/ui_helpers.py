@@ -4,6 +4,7 @@ UI Helper functions for Streamlit app - keeps main app clean
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 from typing import List, Dict, Tuple, Optional
 
 
@@ -133,3 +134,126 @@ def create_bar_chart(avg_scores: Dict[str, float], full_avg_scores: Optional[Dic
         height=300, margin=dict(l=50, r=20, t=10, b=40)
     )
     return fig
+
+
+def create_response_metrics_charts(df: pd.DataFrame, full_df: pd.DataFrame = None) -> Tuple[go.Figure, go.Figure]:
+    """
+    Create charts for response characteristics (word count, readability)
+    
+    Returns:
+        Tuple of (word_count_chart, readability_chart)
+    """
+    # Filter successful evaluations
+    success_df = df[df['success'] == True].copy()
+    
+    # Check if metrics columns exist (for backward compatibility)
+    has_metrics = all(col in df.columns for col in ['word_count', 'readability_score', 'grade_level'])
+    
+    if success_df.empty or not has_metrics:
+        # Return empty charts
+        empty_fig = go.Figure()
+        empty_fig.update_layout(
+            title="Metrics not available (run new evaluation to see response characteristics)",
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#d4d4d8'),
+            height=200
+        )
+        return empty_fig, empty_fig
+    
+    # Calculate global maximum from full dataset if provided, otherwise use current data
+    if full_df is not None and not full_df.empty:
+        full_success_df = full_df[full_df['success'] == True].copy()
+        if not full_success_df.empty and 'word_count' in full_success_df.columns:
+            all_metrics = full_success_df.groupby('system_prompt')['word_count'].mean()
+            global_max_word_count = all_metrics.max()
+        else:
+            global_max_word_count = success_df['word_count'].max() if not success_df.empty else 400
+    else:
+        global_max_word_count = success_df['word_count'].max() if not success_df.empty else 400
+    
+    y_max = global_max_word_count * 1.1  # Add 10% padding above the highest bar globally
+    
+    # Then group the filtered data for display
+    metrics_by_prompt = success_df.groupby('system_prompt').agg({
+        'word_count': 'mean',
+        'readability_score': 'mean',
+        'grade_level': 'mean'
+    }).reset_index()
+    
+    # Word Count Chart
+    word_fig = px.bar(
+        metrics_by_prompt,
+        x=[1] * len(metrics_by_prompt),  # Single bar, no labels needed
+        y='word_count',
+        title="Average Word Count"
+    )
+    
+    word_fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#d4d4d8', family='Inter'),
+        title=dict(font=dict(color='#d4d4d8', size=14)),
+        xaxis=dict(title="", color='#d4d4d8', showticklabels=False),
+        yaxis=dict(
+            title="Average Words", 
+            color='#d4d4d8',
+            range=[0, y_max]  # Dynamic scale: 0 to max_word_count + 10%
+        ),
+        height=250,
+        showlegend=False
+    )
+    
+    # Make all bars the same color
+    word_fig.update_traces(marker_color='#3b82f6')
+    
+    # Readability Chart
+    readability_fig = px.scatter(
+        metrics_by_prompt,
+        x='readability_score',
+        y='grade_level',
+        size='word_count',
+        title="Readability: Flesch Score vs Grade Level",
+        labels={
+            'readability_score': 'Flesch Reading Ease (higher = easier)',
+            'grade_level': 'Grade Level Required'
+        }
+    )
+    
+    readability_fig.update_layout(
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#d4d4d8', family='Inter'),
+        title=dict(font=dict(color='#d4d4d8', size=14)),
+        xaxis=dict(color='#d4d4d8'),
+        yaxis=dict(color='#d4d4d8'),
+        height=300  # Match the bar chart height
+    )
+    
+    return word_fig, readability_fig
+
+
+def extract_response_metrics_summary(df: pd.DataFrame) -> Dict[str, float]:
+    """
+    Extract summary statistics for response metrics
+    
+    Returns:
+        Dictionary with average metrics across all responses
+    """
+    success_df = df[df['success'] == True]
+    
+    # Check if metrics columns exist (for backward compatibility)
+    has_metrics = all(col in df.columns for col in ['word_count', 'readability_score', 'grade_level'])
+    
+    if success_df.empty or not has_metrics:
+        return {
+            'avg_word_count': 0,
+            'avg_readability': 0,
+            'avg_grade_level': 0
+        }
+    
+    return {
+        'avg_word_count': round(success_df['word_count'].mean(), 1),
+        'avg_readability': round(success_df['readability_score'].mean(), 1),
+        'avg_grade_level': round(success_df['grade_level'].mean(), 1)
+    }

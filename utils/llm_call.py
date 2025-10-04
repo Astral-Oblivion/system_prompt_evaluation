@@ -8,8 +8,9 @@ import httpx
 from typing import List, Dict
 from loguru import logger
 
-# Configure logger
-logger.add("logs/api_calls.log", rotation="10 MB", retention="7 days")
+# Configure logger (only if not already configured)
+if not any("api_calls.log" in str(handler._sink) for handler in logger._core.handlers.values()):
+    logger.add("logs/api_calls.log", rotation="50 MB", retention="3 days")
 
 async def llm_call(model_name: str, messages: List[Dict[str, str]], call_type: str = "general") -> str:
     """
