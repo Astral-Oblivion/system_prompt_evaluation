@@ -214,3 +214,12 @@ logs/
 *.log
 .streamlit/secrets.toml
 cached_results/
+
+# macOS system files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

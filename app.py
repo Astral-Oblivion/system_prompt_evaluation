@@ -238,13 +238,83 @@ def main():
     with st.sidebar:
         # Header
         st.markdown("""
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 24px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
             <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="color: #71717a;">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
             </svg>
             <h2 style="margin: 0; font-size: 1.125rem; font-weight: 600; color: #fafafa;">Prompt Builder</h2>
         </div>
         """, unsafe_allow_html=True)
+        
+        # Simple toggle with tabs approach
+        st.markdown("**MODE**")
+        
+        # Create two columns for toggle buttons
+        col1, col2 = st.columns(2)
+        
+        # Initialize mode if not set
+        if 'interface_mode' not in st.session_state:
+            st.session_state.interface_mode = "Default Sections"
+        
+        # Custom CSS for better button styling with clear active state
+        st.markdown("""
+        <style>
+        /* Secondary (inactive) buttons */
+        .stButton > button[kind="secondary"] {
+            width: 100%;
+            border-radius: 6px;
+            border: 1px solid #404040;
+            background-color: #2d2d2d;
+            color: #888;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .stButton > button[kind="secondary"]:hover {
+            background-color: #3d3d3d;
+            border-color: #505050;
+            color: #aaa;
+        }
+        
+        /* Primary (active) buttons */
+        .stButton > button[kind="primary"] {
+            width: 100%;
+            border-radius: 6px;
+            border: 1px solid #3b82f6;
+            background-color: #3b82f6;
+            color: white;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .stButton > button[kind="primary"]:hover {
+            background-color: #2563eb;
+            border-color: #2563eb;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        with col1:
+            if st.button(
+                "Default Sections",
+                key="btn_default",
+                use_container_width=True,
+                type="primary" if st.session_state.interface_mode == "Default Sections" else "secondary"
+            ):
+                st.session_state.interface_mode = "Default Sections"
+                st.rerun()
+        
+        with col2:
+            if st.button(
+                "Custom Analyzer", 
+                key="btn_custom",
+                use_container_width=True,
+                type="primary" if st.session_state.interface_mode == "Custom Prompt Analyzer" else "secondary"
+            ):
+                st.session_state.interface_mode = "Custom Prompt Analyzer"
+                st.rerun()
+        
+        mode = st.session_state.interface_mode
+        
+        st.markdown("<hr style='border: 1px solid #27272a; margin: 16px 0;'>", unsafe_allow_html=True)
         
         if 'custom_sections' not in st.session_state:
             st.session_state.custom_sections = []
@@ -253,98 +323,111 @@ def main():
         if 'use_custom_sections' not in st.session_state:
             st.session_state.use_custom_sections = False
 
-        if not results_df.empty and 'system_prompt' in results_df.columns:
-            if st.session_state.use_custom_sections and st.session_state.custom_sections:
-                sections_to_use = st.session_state.custom_sections
-                st.markdown("**Using Custom Analyzed Sections:**")
+        if mode == "Default Sections":
+            # Default interface - show custom sections if available, otherwise pre-built sections
+            if not results_df.empty and 'system_prompt' in results_df.columns:
+                # Check if we have custom sections from a previous analysis
+                if st.session_state.custom_sections:
+                    sections_to_use = st.session_state.custom_sections
+                    
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.markdown("**Custom Analyzed Sections:**")
+                        st.caption("These sections were extracted from your analyzed prompt. Toggle them to see performance differences.")
+                    with col2:
+                        if st.button("Reset to Default", key="reset_sections", help="Switch back to pre-built sections"):
+                            st.session_state.custom_sections = []
+                            st.session_state.analysis_result = None
+                            st.session_state.use_custom_sections = False
+                            st.rerun()
+                else:
+                    sections_to_use = [
+                        "You are Claude, a helpful AI assistant created by Anthropic.",
+                        "Be direct and concise. Avoid unnecessary flattery like 'great question' or 'excellent idea'.",
+                        "Think critically and provide balanced perspectives. Don't just agree with everything.",
+                        "When uncertain, acknowledge limitations and suggest ways to find better information.",
+                        "Use examples and analogies to make complex topics more understandable.",
+                        "Be encouraging but realistic about challenges and potential outcomes."
+                    ]
+                    st.markdown("**Default Prompt Sections:**")
+                    st.caption("Pre-built sections for testing. Switch to Custom Analyzer mode to analyze your own prompt.")
+                
+                selected_sections = []
+                section_states = {}
+                
+                for i, section in enumerate(sections_to_use):
+                    key = f"section_{i}"
+                    is_selected = st.checkbox(section, value=True, key=key)
+                    section_states[key] = is_selected
+                    if is_selected:
+                        selected_sections.append(section)
+                
+                if selected_sections:
+                    current_prompt_text = '\n\n'.join(selected_sections)
+                    current_combination = current_prompt_text
+                else:
+                    current_combination = None
             else:
-                sections_to_use = [
-                    "You are Claude, a helpful AI assistant created by Anthropic.",
-                    "Be direct and concise. Avoid unnecessary flattery like 'great question' or 'excellent idea'.",
-                    "Think critically and provide balanced perspectives. Don't just agree with everything.",
-                    "When uncertain, acknowledge limitations and suggest ways to find better information.",
-                    "Use examples and analogies to make complex topics more understandable.",
-                    "Be encouraging but realistic about challenges and potential outcomes."
-                ]
-                st.markdown("**Default Prompt Sections:**")
-            
-            selected_sections = []
-            section_states = {}
-            
-            for i, section in enumerate(sections_to_use):
-                key = f"section_{i}"
-                is_selected = st.checkbox(section, value=True, key=key)
-                section_states[key] = is_selected
-                if is_selected:
-                    selected_sections.append(section)
-            
-            if selected_sections:
-                current_prompt_text = '\n\n'.join(selected_sections)
-                current_combination = current_prompt_text
-            else:
+                st.info("No cached data available. Run a batch evaluation first.")
+                selected_sections = []
                 current_combination = None
-        else:
-            st.info("No cached data available. Run a batch evaluation first.")
-            selected_sections = []
-            current_combination = None
         
-        st.markdown("<hr style='border: 1px solid #27272a; margin: 24px 0;'>", unsafe_allow_html=True)
         
-        # Custom Prompt Analysis Section
-        st.markdown("""
-        <div style="margin-bottom: 24px;">
-            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
-                <div style="width: 4px; height: 4px; border-radius: 50%; background-color: #8b5cf6;"></div>
-                <span style="font-size: 0.75rem; font-weight: 500; color: #71717a; text-transform: uppercase; letter-spacing: 0.05em;">Custom Prompt</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        custom_prompt = st.text_area(
-            "Paste your system prompt here:",
-            height=150,
-            placeholder="Paste a system prompt to analyze and test...",
-            key="custom_prompt_input"
-        )
-        
-        # Analysis mode toggle
-        exclude_factual = st.checkbox(
-            "Behavioral instructions only (exclude factual content)",
-            value=True,
-            help="If checked, only extracts behavioral instructions. If unchecked, decomposes ALL content into sections."
-        )
-        
-        if st.button("Analyze Prompt", disabled=not custom_prompt.strip()):
-            if custom_prompt.strip():
-                with st.spinner("Analyzing prompt..."):
-                    try:
-                        result = asyncio.run(decompose_system_prompt(custom_prompt.strip(), exclude_factual=exclude_factual))
-                        st.session_state.analysis_result = result
-                        if result['success']:
-                            st.session_state.custom_sections = result['sections']
-                            st.session_state.use_custom_sections = True
-                            st.success(f"Analyzed into {len(result['sections'])} sections")
-                        else:
-                            st.error(f"Analysis failed: {result['analysis']}")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-        
-        # Display analysis results
-        if st.session_state.analysis_result and st.session_state.analysis_result['success']:
-            st.markdown("**Analysis:**")
-            st.write(st.session_state.analysis_result['analysis'])
+        elif mode == "Custom Prompt Analyzer":
+            # Custom prompt analyzer interface
+            st.markdown("**Custom Prompt Analysis:**")
             
-            # Toggle to use custom sections
-            use_custom = st.checkbox(
-                "Use these sections for evaluation", 
-                value=st.session_state.use_custom_sections,
-                key="use_custom_toggle"
+            custom_prompt = st.text_area(
+                "Paste your system prompt here:",
+                height=150,
+                placeholder="Paste a system prompt to analyze and test...",
+                key="custom_prompt_input"
             )
-            st.session_state.use_custom_sections = use_custom
             
-            # Run evaluation button
-            if st.button("Run Evaluation on These Sections", type="primary"):
-                st.session_state.show_eval_config = True
+            # Analysis mode toggle
+            exclude_factual = st.checkbox(
+                "Behavioral instructions only (exclude factual content)",
+                value=True,
+                help="If checked, only extracts behavioral instructions. If unchecked, decomposes ALL content into sections."
+            )
+        
+            if st.button("Analyze Prompt", disabled=not custom_prompt.strip()):
+                if custom_prompt.strip():
+                    with st.spinner("Analyzing prompt..."):
+                        try:
+                            result = asyncio.run(decompose_system_prompt(custom_prompt.strip(), exclude_factual=exclude_factual))
+                            st.session_state.analysis_result = result
+                            if result['success']:
+                                st.session_state.custom_sections = result['sections']
+                                st.session_state.use_custom_sections = True
+                                st.success(f"Analyzed into {len(result['sections'])} sections")
+                            else:
+                                st.error(f"Analysis failed: {result['analysis']}")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+            
+            # Display analysis results
+            if st.session_state.analysis_result and st.session_state.analysis_result['success']:
+                # Display extracted sections
+                st.markdown("**Extracted Sections:**")
+                for i, section in enumerate(st.session_state.analysis_result['sections'], 1):
+                    st.markdown(f"**{i}.** {section}")
+                
+                # Toggle to use custom sections
+                use_custom = st.checkbox(
+                    "Use these sections for evaluation", 
+                    value=st.session_state.use_custom_sections,
+                    key="use_custom_toggle"
+                )
+                st.session_state.use_custom_sections = use_custom
+                
+                # Run evaluation button
+                if st.button("Run Evaluation on These Sections", type="primary"):
+                    st.session_state.show_eval_config = True
+            
+            # Set variables for main interface
+            selected_sections = st.session_state.custom_sections if st.session_state.use_custom_sections else []
+            current_combination = '\n\n'.join(selected_sections) if selected_sections else None
         
         st.markdown("<hr style='border: 1px solid #27272a; margin: 24px 0;'>", unsafe_allow_html=True)
         
