@@ -158,12 +158,18 @@ logger.add("logs/app.log", rotation="10 MB", retention="30 days",
 
 
 @st.cache_data
-def load_cached_results():
+def load_cached_results(use_original_dataset=False):
     """Load cached evaluation results with caching for performance"""
     evaluator = PromptEvaluator()
     try:
-        df = evaluator.load_cached_results()
-        logger.info(f"Loaded {len(df)} cached results")
+        if use_original_dataset:
+            # Load the original large dataset for default sections
+            df = evaluator.load_cached_results("cached_results/full_evaluation_backup.csv")
+            logger.info(f"Loaded {len(df)} original cached results")
+        else:
+            # Load current results (custom evaluations)
+            df = evaluator.load_cached_results()
+            logger.info(f"Loaded {len(df)} current cached results")
         return df
     except Exception as e:
         logger.error(f"Failed to load cached results: {e}")
@@ -231,8 +237,17 @@ def main():
     """Main Streamlit application"""
     st.title("Prompt Testing Tool")
     
-    # Load cached results
-    results_df = load_cached_results()
+    # Determine which dataset to load based on whether we have custom sections
+    if 'custom_sections' not in st.session_state:
+        st.session_state.custom_sections = []
+    
+    # Load appropriate dataset
+    if st.session_state.custom_sections:
+        # Load custom evaluation results
+        results_df = load_cached_results(use_original_dataset=False)
+    else:
+        # Load original dataset for default sections
+        results_df = load_cached_results(use_original_dataset=True)
     
     # Sidebar
     with st.sidebar:
@@ -254,7 +269,7 @@ def main():
         
         # Initialize mode if not set
         if 'interface_mode' not in st.session_state:
-            st.session_state.interface_mode = "Default Sections"
+            st.session_state.interface_mode = "Toggleable Sections"
         
         # Custom CSS for better button styling with clear active state
         st.markdown("""
@@ -294,12 +309,12 @@ def main():
         
         with col1:
             if st.button(
-                "Default Sections",
+                "Toggleable Sections",
                 key="btn_default",
                 use_container_width=True,
-                type="primary" if st.session_state.interface_mode == "Default Sections" else "secondary"
+                type="primary" if st.session_state.interface_mode == "Toggleable Sections" else "secondary"
             ):
-                st.session_state.interface_mode = "Default Sections"
+                st.session_state.interface_mode = "Toggleable Sections"
                 st.rerun()
         
         with col2:
@@ -323,7 +338,7 @@ def main():
         if 'use_custom_sections' not in st.session_state:
             st.session_state.use_custom_sections = False
 
-        if mode == "Default Sections":
+        if mode == "Toggleable Sections":
             # Default interface - show custom sections if available, otherwise pre-built sections
             if not results_df.empty and 'system_prompt' in results_df.columns:
                 # Check if we have custom sections from a previous analysis
