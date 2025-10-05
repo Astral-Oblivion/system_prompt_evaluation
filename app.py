@@ -408,6 +408,11 @@ def main():
         
             if st.button("Analyze Prompt", disabled=not custom_prompt.strip()):
                 if custom_prompt.strip():
+                    # Clear previous evaluation state when analyzing new prompt
+                    for key in list(st.session_state.keys()):
+                        if 'eval' in key.lower():
+                            del st.session_state[key]
+                    
                     with st.spinner("Analyzing prompt..."):
                         try:
                             result = asyncio.run(decompose_system_prompt(custom_prompt.strip(), exclude_factual=exclude_factual))
@@ -719,8 +724,11 @@ if st.session_state.show_eval_config:
     with col5:
         if st.button("Start Evaluation", type="primary", key="start_eval"):
             if st.session_state.get('evaluation_complete', False):
-                st.warning("Evaluation already completed! Scroll down to see results or refresh the page to start a new evaluation.")
-            elif st.session_state.custom_sections:
+                # Clear the completion flag and allow new evaluation
+                st.session_state.evaluation_complete = False
+                st.info("Starting new evaluation...")
+            
+            if st.session_state.custom_sections:
                 st.session_state.eval_running = True
                 st.session_state.eval_config = {
                     'sections': st.session_state.custom_sections,

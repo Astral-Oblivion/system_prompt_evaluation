@@ -50,13 +50,22 @@ async def retry_failed_evaluations(batch_size: int = 50, delay_between_batches: 
         
         logger.info(f"Processing batch {batch_num + 1}/{total_batches} ({len(batch_df)} evaluations)")
         
-        # Create tasks for this batch
-        tasks = []
+        # Group failed evaluations by (system_prompt, test_query) to use new efficient method
+        # Since we now evaluate all dimensions together, we need to group by prompt-query pairs
+        grouped_failures = {}
         for _, row in batch_df.iterrows():
-            task = evaluator.evaluate_single_combination(
-                system_prompt=row['system_prompt'],
-                test_query=row['test_query'],
-                evaluation_question=row['evaluation_question']
+            key = (row['system_prompt'], row['test_query'])
+            if key not in grouped_failures:
+                grouped_failures[key] = []
+            grouped_failures[key].append(row['evaluation_question'])
+        
+        # Create tasks for unique prompt-query combinations
+        tasks = []
+        for (system_prompt, test_query), eval_questions in grouped_failures.items():
+            task = evaluator.evaluate_prompt_query_combination(
+                system_prompt=system_prompt,
+                test_query=test_query,
+                evaluation_questions=eval_questions
             )
             tasks.append(task)
         
@@ -64,8 +73,8 @@ async def retry_failed_evaluations(batch_size: int = 50, delay_between_batches: 
         batch_results = []
         for i, task in enumerate(tasks):
             try:
-                result = await task
-                batch_results.append(result)
+                result_list = await task  # This now returns a list of results for all dimensions
+                batch_results.extend(result_list)  # Flatten the results
                 
                 # Small delay between individual calls within batch
                 if i < len(tasks) - 1:  # Don't delay after last item
@@ -73,14 +82,19 @@ async def retry_failed_evaluations(batch_size: int = 50, delay_between_batches: 
                     
             except Exception as e:
                 logger.error(f"Task failed: {e}")
-                # Still append a failed result to maintain indexing
-                batch_results.append({
-                    "system_prompt": batch_df.iloc[i]['system_prompt'],
-                    "test_query": batch_df.iloc[i]['test_query'],
-                    "evaluation_question": batch_df.iloc[i]['evaluation_question'],
-                    "error": str(e),
-                    "success": False
-                })
+                # Create failed results for all dimensions in this task
+                task_key = list(grouped_failures.keys())[i]
+                system_prompt, test_query = task_key
+                eval_questions = grouped_failures[task_key]
+                
+                for eval_question in eval_questions:
+                    batch_results.append({
+                        "system_prompt": system_prompt,
+                        "test_query": test_query,
+                        "evaluation_question": eval_question,
+                        "error": str(e),
+                        "success": False
+                    })
         
         # Collect successful results
         successful_results = [r for r in batch_results if r.get('success', False)]

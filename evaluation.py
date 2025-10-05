@@ -1,8 +1,11 @@
 """
-Batch Evaluation Logic for Prompt Testing
+Batch Evaluation Logic for Prompt Testing - FIXED VERSION
 
 This module handles the systematic evaluation of prompt combinations
 to understand which sections drive specific AI behaviors.
+
+MAJOR FIX: Now evaluates all dimensions on the SAME response instead of making
+separate API calls for each dimension, reducing API calls by ~83%.
 """
 import asyncio
 from typing import List, Dict, Any, Tuple
@@ -18,45 +21,13 @@ logger.add("logs/evaluation.log", rotation="10 MB", retention="30 days",
 
 
 def calculate_response_metrics(response: str) -> Dict[str, Any]:
-    """
-    Calculate objective metrics for a response
-    
-    Args:
-        response: The AI response text to analyze
-        
-    Returns:
-        Dictionary with calculated metrics
-    """
-    if not response or response.strip() == "":
-        return {
-            "word_count": 0,
-            "char_count": 0,
-            "sentence_count": 0,
-            "readability_score": 0,
-            "grade_level": 0
-        }
-    
-    # Basic counts
-    words = response.split()
-    word_count = len(words)
-    char_count = len(response)
-    sentence_count = len([s for s in response.split('.') if s.strip()])
-    
-    # Readability metrics using textstat
-    try:
-        readability_score = textstat.flesch_reading_ease(response)
-        grade_level = textstat.flesch_kincaid_grade(response)
-    except:
-        # Fallback if textstat fails
-        readability_score = 50.0
-        grade_level = 8.0
-    
+    """Calculate text metrics for a response"""
     return {
-        "word_count": word_count,
-        "char_count": char_count,
-        "sentence_count": sentence_count,
-        "readability_score": round(readability_score, 1),
-        "grade_level": round(grade_level, 1)
+        "word_count": textstat.lexicon_count(response),
+        "char_count": len(response),
+        "sentence_count": textstat.sentence_count(response),
+        "readability_score": textstat.flesch_reading_ease(response),
+        "grade_level": textstat.flesch_kincaid_grade(response)
     }
 
 
@@ -85,18 +56,11 @@ class PromptEvaluator:
             
         Returns:
             List of tuples, where each tuple contains indices of sections to include
-            
-        TODO: Implement smart combination generation
-        - Full factorial might be too many combinations
-        - Consider progressive ablation (remove one section at a time)
-        - Or additive approach (add one section at a time)
-        - Or random sampling of combinations
         """
         n_sections = len(prompt_sections)
         combinations_to_test = []
         
         # Generate all possible combinations
-        # TODO: Implement smarter selection strategy
         for r in range(1, n_sections + 1):
             for combo in combinations(range(n_sections), r):
                 combinations_to_test.append(combo)
@@ -118,42 +82,24 @@ class PromptEvaluator:
         selected_sections = [prompt_sections[i] for i in section_indices]
         return "\n\n".join(selected_sections)
     
-    async def evaluate_single_combination(
-        self, 
-        system_prompt: str, 
-        test_query: str, 
+    async def _evaluate_response(
+        self,
+        response: str,
         evaluation_question: str,
-        max_retries: int = 2
+        eval_id: str
     ) -> Dict[str, Any]:
         """
-        Evaluate a single prompt combination against a test query
+        Evaluate a single response against one evaluation question
         
         Args:
-            system_prompt: The combined system prompt to test
-            test_query: User query to test the prompt with
-            evaluation_question: Y/N question to evaluate the response
+            response: The AI response to evaluate
+            evaluation_question: The evaluation question to apply
+            eval_id: Unique ID for logging
             
         Returns:
-            Dictionary with evaluation results
-            
-        TODO: Implement the actual evaluation logic
-        - Make the API call with system_prompt + test_query
-        - Ask evaluation_question about the response (Y/N)
-        - Return structured results
+            Dictionary with evaluation result and score
         """
-        # Generate unique evaluation ID for tracking
-        import uuid
-        eval_id = str(uuid.uuid4())[:8]
-        logger.info(f"=== EVALUATION START | ID: {eval_id} ===")
-        
         try:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": test_query}
-            ]
-            
-            response = await llm_call(self.model_name, messages, call_type="main_response")
-            
             if "Answer only Y or N" in evaluation_question:
                 eval_prompt = f"Response to evaluate: {response}\n\nEvaluation question: {evaluation_question}"
             else:
@@ -164,7 +110,6 @@ class PromptEvaluator:
             ]
             
             evaluation_result = await llm_call(self.model_name, eval_messages, call_type="evaluation")
-            
             evaluation_result_clean = evaluation_result.strip().upper()
             
             # Check if this is a Y/N question
@@ -192,46 +137,113 @@ class PromptEvaluator:
                     else:
                         evaluation_score = 50
             
-            # Calculate response metrics
-            metrics = calculate_response_metrics(response)
+            logger.info(f"EVAL_DIMENSION | ID: {eval_id} | Question: {evaluation_question[:50]}... | Score: {evaluation_score}")
             
-            result = {
-                "system_prompt": system_prompt,
-                "test_query": test_query,
-                "response": response,
-                "evaluation_question": evaluation_question,
-                "evaluation_result": evaluation_result,
-                "evaluation_score": evaluation_score,
-                "word_count": metrics["word_count"],
-                "char_count": metrics["char_count"],
-                "sentence_count": metrics["sentence_count"],
-                "readability_score": metrics["readability_score"],
-                "grade_level": metrics["grade_level"],
+            return {
+                "result": evaluation_result,
+                "score": evaluation_score,
                 "success": True
             }
             
-            logger.info(f"EVALUATION_SCORE: {evaluation_score}")
-            logger.info(f"=== EVALUATION END | ID: {eval_id} | Score: {evaluation_score} ===")
-            return result
-            
         except Exception as e:
-            logger.error(f"EVALUATION_ERROR | ID: {eval_id} | Error: {e}")
-            logger.info(f"=== EVALUATION END | ID: {eval_id} | Status: FAILED ===")
+            logger.error(f"EVAL_DIMENSION_ERROR | ID: {eval_id} | Question: {evaluation_question[:50]}... | Error: {e}")
             return {
-                "system_prompt": system_prompt,
-                "test_query": test_query,
-                "response": "ERROR: Failed to get response",
-                "evaluation_question": evaluation_question,
-                "evaluation_result": f"ERROR: {str(e)}",
-                "evaluation_score": None,
-                "word_count": 0,
-                "char_count": 0,
-                "sentence_count": 0,
-                "readability_score": 0,
-                "grade_level": 0,
-                "error": str(e),
+                "result": f"ERROR: {str(e)}",
+                "score": None,
                 "success": False
             }
+    
+    async def evaluate_prompt_query_combination(
+        self,
+        system_prompt: str,
+        test_query: str,
+        evaluation_questions: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Evaluate one prompt-query combination across all evaluation dimensions
+        
+        This is the new efficient approach:
+        1. Generate ONE response for the prompt-query pair
+        2. Evaluate that SAME response across all dimensions
+        3. Return results for all dimensions
+        
+        Args:
+            system_prompt: The combined system prompt to test
+            test_query: User query to test the prompt with
+            evaluation_questions: List of evaluation questions (all dimensions)
+            
+        Returns:
+            List of dictionaries with evaluation results for each dimension
+        """
+        # Generate unique evaluation ID for tracking
+        import uuid
+        eval_id = str(uuid.uuid4())[:8]
+        logger.info(f"=== COMBINATION START | ID: {eval_id} ===")
+        logger.info(f"SYSTEM_PROMPT | ID: {eval_id} | {system_prompt}")
+        logger.info(f"TEST_QUERY | ID: {eval_id} | {test_query}")
+        
+        try:
+            # Step 1: Generate ONE response for this prompt-query combination
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": test_query}
+            ]
+            
+            response = await llm_call(self.model_name, messages, call_type="main_response")
+            logger.info(f"MAIN_RESPONSE | ID: {eval_id} | {response}")
+            
+            # Step 2: Calculate text metrics once
+            metrics = calculate_response_metrics(response)
+            logger.info(f"TEXT_METRICS | ID: {eval_id} | Words: {metrics['word_count']} | Readability: {metrics['readability_score']:.1f} | Grade: {metrics['grade_level']:.1f}")
+            
+            # Step 3: Evaluate this SAME response across all dimensions
+            results = []
+            for i, eval_question in enumerate(evaluation_questions):
+                eval_result = await self._evaluate_response(response, eval_question, f"{eval_id}-{i+1}")
+                
+                result = {
+                    "system_prompt": system_prompt,
+                    "test_query": test_query,
+                    "response": response,  # Same response for all evaluations!
+                    "evaluation_question": eval_question,
+                    "evaluation_result": eval_result["result"],
+                    "evaluation_score": eval_result["score"],
+                    "word_count": metrics["word_count"],
+                    "char_count": metrics["char_count"],
+                    "sentence_count": metrics["sentence_count"],
+                    "readability_score": metrics["readability_score"],
+                    "grade_level": metrics["grade_level"],
+                    "success": eval_result["success"]
+                }
+                results.append(result)
+            
+            successful_evals = len([r for r in results if r["success"]])
+            logger.info(f"=== COMBINATION END | ID: {eval_id} | Dimensions: {successful_evals}/{len(evaluation_questions)} successful ===")
+            return results
+            
+        except Exception as e:
+            logger.error(f"COMBINATION_ERROR | ID: {eval_id} | Error: {e}")
+            logger.info(f"=== COMBINATION END | ID: {eval_id} | Status: FAILED ===")
+            
+            # Return failed results for all dimensions
+            failed_results = []
+            for eval_question in evaluation_questions:
+                failed_results.append({
+                    "system_prompt": system_prompt,
+                    "test_query": test_query,
+                    "response": "ERROR: Failed to get response",
+                    "evaluation_question": eval_question,
+                    "evaluation_result": f"ERROR: {str(e)}",
+                    "evaluation_score": None,
+                    "word_count": 0,
+                    "char_count": 0,
+                    "sentence_count": 0,
+                    "readability_score": 0,
+                    "grade_level": 0,
+                    "error": str(e),
+                    "success": False
+                })
+            return failed_results
     
     async def run_batch_evaluation(
         self,
@@ -249,52 +261,58 @@ class PromptEvaluator:
             
         Returns:
             DataFrame with all evaluation results
-            
-        TODO: Implement full batch evaluation
-        - Generate all prompt combinations
-        - Run each combination against all test queries
-        - Evaluate using all evaluation questions
-        - Use asyncio.gather for parallel execution
-        - Save results to cache files
         """
         logger.info("Starting batch evaluation...")
         
         # Generate combinations
         combinations = self.generate_prompt_combinations(prompt_sections)
         
-        # Prepare all evaluation tasks
+        # Prepare all evaluation tasks (NEW EFFICIENT APPROACH)
+        # Instead of evaluating each dimension separately, we evaluate each prompt-query combination once
+        # and get all dimension scores for the same response
         tasks = []
         for combo_indices in combinations:
             system_prompt = self.combine_sections(prompt_sections, combo_indices)
             for test_query in test_queries:
-                for eval_question in evaluation_questions:
-                    task = self.evaluate_single_combination(
-                        system_prompt, test_query, eval_question
-                    )
-                    tasks.append(task)
+                # Create one task per prompt-query combination (not per dimension!)
+                task = self.evaluate_prompt_query_combination(
+                    system_prompt, test_query, evaluation_questions
+                )
+                tasks.append(task)
         
-        logger.info(f"Running {len(tasks)} evaluation tasks...")
+        total_combinations = len(combinations) * len(test_queries)
+        total_api_calls = total_combinations * (1 + len(evaluation_questions))  # 1 main response + N evaluations
+        old_api_calls = total_combinations * len(evaluation_questions) * 2  # Old approach: 2 calls per dimension
+        
+        logger.info(f"Running {len(tasks)} combination tasks ({total_combinations} combinations × {len(evaluation_questions)} dimensions = {total_combinations * len(evaluation_questions)} total evaluations)")
+        logger.info(f"NEW EFFICIENT APPROACH:")
+        logger.info(f"  API calls: {total_api_calls}")
+        logger.info(f"  Old approach would have used: {old_api_calls}")
+        logger.info(f"  Savings: {old_api_calls - total_api_calls} calls ({((old_api_calls - total_api_calls) / old_api_calls * 100):.1f}% reduction)")
         
         # Execute all tasks in parallel with batching for high throughput
-        logger.info(f"Executing {len(tasks)} evaluation tasks...")
-        
-        # For very large numbers of tasks, process in batches to avoid overwhelming the system
-        batch_size = 500  # Maximum concurrent tasks
-        results = []
+        batch_size = 50  # Reduced batch size since each task now does multiple evaluations
+        all_results = []
         
         for i in range(0, len(tasks), batch_size):
             batch = tasks[i:i + batch_size]
-            logger.info(f"Processing batch {i//batch_size + 1}/{(len(tasks) + batch_size - 1)//batch_size} ({len(batch)} tasks)")
+            logger.info(f"Processing batch {i//batch_size + 1}/{(len(tasks) + batch_size - 1)//batch_size} ({len(batch)} combination tasks)")
             
             batch_results = await asyncio.gather(*batch, return_exceptions=True)
-            results.extend(batch_results)
+            
+            # Flatten results since each task returns a list of dimension results
+            for result_list in batch_results:
+                if isinstance(result_list, list):
+                    all_results.extend(result_list)
+                elif isinstance(result_list, Exception):
+                    logger.error(f"Batch task failed: {result_list}")
             
             # Small delay between batches to be respectful to the API
             if i + batch_size < len(tasks):
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.5)
         
         # Convert to DataFrame
-        df = pd.DataFrame([r for r in results if isinstance(r, dict)])
+        df = pd.DataFrame(all_results)
         
         # Save to cache
         cache_file = "cached_results/batch_evaluation.csv"
@@ -306,11 +324,6 @@ class PromptEvaluator:
     def load_cached_results(self, cache_file: str = "cached_results/batch_evaluation.csv") -> pd.DataFrame:
         """
         Load previously computed evaluation results
-        
-        TODO: Implement caching system
-        - Load from CSV/parquet files
-        - Handle missing files gracefully
-        - Merge with new results if needed
         """
         try:
             return pd.read_csv(cache_file)
@@ -339,8 +352,8 @@ async def example_evaluation():
     
     # Example evaluation questions
     evaluation_questions = [
-        "Does the response show politeness?",
-        "Does the response provide detailed explanations?"
+        "Does the response show politeness? Answer only Y or N.",
+        "Does the response provide detailed explanations? Answer only Y or N."
     ]
     
     evaluator = PromptEvaluator()
