@@ -16,6 +16,7 @@ from utils.ui_helpers import (
 import asyncio
 
 load_dotenv()
+print(f"API Key loaded: {os.getenv('OPENROUTER_API_KEY') is not None}")
 try:
     from utils.prompt_analyzer import decompose_system_prompt
 except ImportError:

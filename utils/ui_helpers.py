@@ -124,10 +124,10 @@ def create_bar_chart(avg_scores: Dict[str, float], full_avg_scores: Optional[Dic
     
     fig.update_layout(
         barmode='group',
-        yaxis=dict(range=[0, 100], title='Score', gridcolor='rgba(39, 39, 42, 0.5)',
-                  tickfont=dict(color='#a1a1aa', size=11), titlefont=dict(color='#d4d4d8', size=12, family='Inter')),
-        xaxis=dict(title='Dimensions', tickfont=dict(color='#a1a1aa', size=11),
-                  titlefont=dict(color='#d4d4d8', size=12, family='Inter')),
+        yaxis=dict(range=[0, 100], title=dict(text='Score', font=dict(color='#d4d4d8', size=12, family='Inter')),
+                  gridcolor='rgba(39, 39, 42, 0.5)', tickfont=dict(color='#a1a1aa', size=11)),
+        xaxis=dict(title=dict(text='Dimensions', font=dict(color='#d4d4d8', size=12, family='Inter')),
+                  tickfont=dict(color='#a1a1aa', size=11)),
         legend=dict(bgcolor='rgba(39, 39, 42, 0.8)', bordercolor='rgba(63, 63, 70, 0.5)',
                    borderwidth=1, font=dict(color='#d4d4d8', size=11)),
         plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
