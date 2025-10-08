@@ -5,9 +5,9 @@ Decompose system prompts into logical sections using LLM analysis
 import asyncio
 from typing import List, Dict, Any
 try:
-    from .llm_call import llm_call
+    from .latteries.caller import llm_call
 except ImportError:
-    from llm_call import llm_call
+    from latteries.caller import llm_call
 from loguru import logger
 
 async def decompose_system_prompt(system_prompt: str, model_name: str = "openai/gpt-4o", exclude_factual: bool = True) -> Dict[str, Any]:
@@ -128,7 +128,7 @@ SECTIONS:
             "success": False
         }
 
-async def validate_sections(sections: List[str], model_name: str = "openai/gpt-4o-mini") -> Dict[str, Any]:
+async def validate_sections(sections: List[str], model_name: str = "openai/gpt-5-nano-2025-08-07") -> Dict[str, Any]:
     """
     Validate that the decomposed sections make sense and are testable
     

@@ -153,7 +153,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Configure logging
+# Configure logging - remove default stderr handler
+logger.remove()  # Remove default handler that prints to stderr
 logger.add("logs/app.log", rotation="10 MB", retention="30 days",
            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
 
@@ -672,16 +673,16 @@ if st.session_state.show_eval_config:
         st.markdown("**Evaluation Type:**")
         eval_type = st.radio(
             "Choose evaluation method:",
-            ["Y/N Questions (Fast & Cheap)", "0-100 Scoring (Detailed & Expensive)"],
+            ["Y/N Questions (Binary Scoring)", "0-100 Scoring (Granular Scoring)"],
             key="eval_type_radio"
         )
-        
+
         use_yn = eval_type.startswith("Y/N")
-        
+
         if use_yn:
-            st.info("6 Y/N questions - Quick evaluation")
+            st.info("6 Y/N questions - Binary scoring (0 or 100)")
         else:
-            st.info("6 detailed scoring dimensions (0-100)")
+            st.info("6 scoring dimensions with 0-100 scale")
     
     with col2:
         st.markdown("**Number of Test Queries:**")
@@ -780,8 +781,8 @@ if st.session_state.eval_running and not st.session_state.get('evaluation_comple
         update_status(f"Using {len(test_queries)} test queries and {len(evaluation_questions)} evaluation questions")
         progress_bar.progress(10)
         
-        # Initialize evaluator
-        evaluator = PromptEvaluator(model_name="openai/gpt-4o-mini")
+        # Initialize evaluator with concurrent request limit
+        evaluator = PromptEvaluator(model_name="openai/gpt-5-nano-2025-08-07", max_concurrent=100)
         
         # Run the existing batch evaluation method
         update_status("Starting batch evaluation...")

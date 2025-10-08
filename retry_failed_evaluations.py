@@ -8,7 +8,8 @@ import time
 from evaluation import PromptEvaluator
 from loguru import logger
 
-# Configure logging
+# Configure logging - remove default stderr handler
+logger.remove()  # Remove default handler that prints to stderr
 logger.add("logs/retry_evaluations.log", rotation="10 MB", retention="30 days",
            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
 
@@ -37,7 +38,7 @@ async def retry_failed_evaluations(batch_size: int = 50, delay_between_batches: 
         return
     
     # Initialize evaluator
-    evaluator = PromptEvaluator(model_name="openai/gpt-4o-mini")
+    evaluator = PromptEvaluator(model_name="openai/gpt-5-nano-2025-08-07")
     
     # Process in batches
     successful_retries = []

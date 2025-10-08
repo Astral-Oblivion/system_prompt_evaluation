@@ -17,7 +17,7 @@ async def llm_call(model_name: str, messages: List[Dict[str, str]], call_type: s
     Make an async API call to OpenRouter
     
     Args:
-        model_name: The model to use (e.g., "openai/gpt-4o-mini")
+        model_name: The model to use (e.g., "openai/gpt-5-nano-2025-08-07")
         messages: List of message dicts with "role" and "content"
         call_type: Type of call for logging ("main_response", "evaluation", "prompt_analysis", etc.)
         

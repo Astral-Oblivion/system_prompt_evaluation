@@ -12,10 +12,11 @@ from typing import List, Dict, Any, Tuple
 from itertools import combinations
 import pandas as pd
 from loguru import logger
-from utils.llm_call import llm_call
+from utils.latteries.caller import llm_call
 import textstat
 
-# Configure logging for evaluation runs
+# Configure logging for evaluation runs - remove default stderr handler
+logger.remove()  # Remove default handler that prints to stderr
 logger.add("logs/evaluation.log", rotation="10 MB", retention="30 days",
            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}")
 
@@ -34,7 +35,7 @@ def calculate_response_metrics(response: str) -> Dict[str, Any]:
 class PromptEvaluator:
     """
     Handles batch evaluation of prompt combinations
-    
+
     Core workflow:
     1. Take a system prompt as List[str] (each string is a section)
     2. Generate all relevant combinations of sections
@@ -42,10 +43,11 @@ class PromptEvaluator:
     4. Evaluate responses using Y/N questions to LLMs
     5. Cache results for instant UI access
     """
-    
-    def __init__(self, model_name: str = "anthropic/claude-3-haiku"):
+
+    def __init__(self, model_name: str = "anthropic/claude-3-haiku", max_concurrent: int = 100):
         self.model_name = model_name
         self.results_cache = {}
+        self.semaphore = asyncio.Semaphore(max_concurrent)
     
     def generate_prompt_combinations(self, prompt_sections: List[str]) -> List[Tuple[int, ...]]:
         """
@@ -153,6 +155,20 @@ class PromptEvaluator:
                 "success": False
             }
     
+    async def _evaluate_with_semaphore(
+        self,
+        system_prompt: str,
+        test_query: str,
+        evaluation_questions: List[str]
+    ) -> List[Dict[str, Any]]:
+        """
+        Wrapper that uses semaphore to limit concurrent API calls
+        """
+        async with self.semaphore:
+            return await self.evaluate_prompt_query_combination(
+                system_prompt, test_query, evaluation_questions
+            )
+
     async def evaluate_prompt_query_combination(
         self,
         system_prompt: str,
@@ -161,17 +177,17 @@ class PromptEvaluator:
     ) -> List[Dict[str, Any]]:
         """
         Evaluate one prompt-query combination across all evaluation dimensions
-        
+
         This is the new efficient approach:
         1. Generate ONE response for the prompt-query pair
         2. Evaluate that SAME response across all dimensions
         3. Return results for all dimensions
-        
+
         Args:
             system_prompt: The combined system prompt to test
             test_query: User query to test the prompt with
             evaluation_questions: List of evaluation questions (all dimensions)
-            
+
         Returns:
             List of dictionaries with evaluation results for each dimension
         """
@@ -275,41 +291,35 @@ class PromptEvaluator:
             system_prompt = self.combine_sections(prompt_sections, combo_indices)
             for test_query in test_queries:
                 # Create one task per prompt-query combination (not per dimension!)
-                task = self.evaluate_prompt_query_combination(
+                # Use semaphore wrapper to limit concurrent API calls
+                task = self._evaluate_with_semaphore(
                     system_prompt, test_query, evaluation_questions
                 )
                 tasks.append(task)
-        
+
         total_combinations = len(combinations) * len(test_queries)
         total_api_calls = total_combinations * (1 + len(evaluation_questions))  # 1 main response + N evaluations
         old_api_calls = total_combinations * len(evaluation_questions) * 2  # Old approach: 2 calls per dimension
-        
+
         logger.info(f"Running {len(tasks)} combination tasks ({total_combinations} combinations × {len(evaluation_questions)} dimensions = {total_combinations * len(evaluation_questions)} total evaluations)")
-        logger.info(f"NEW EFFICIENT APPROACH:")
+        logger.info("NEW EFFICIENT APPROACH:")
         logger.info(f"  API calls: {total_api_calls}")
         logger.info(f"  Old approach would have used: {old_api_calls}")
         logger.info(f"  Savings: {old_api_calls - total_api_calls} calls ({((old_api_calls - total_api_calls) / old_api_calls * 100):.1f}% reduction)")
-        
-        # Execute all tasks in parallel with batching for high throughput
-        batch_size = 50  # Reduced batch size since each task now does multiple evaluations
+        logger.info(f"  Concurrent limit: {self.semaphore._value} simultaneous requests")
+
+        # Execute all tasks with semaphore controlling concurrency
         all_results = []
-        
-        for i in range(0, len(tasks), batch_size):
-            batch = tasks[i:i + batch_size]
-            logger.info(f"Processing batch {i//batch_size + 1}/{(len(tasks) + batch_size - 1)//batch_size} ({len(batch)} combination tasks)")
-            
-            batch_results = await asyncio.gather(*batch, return_exceptions=True)
-            
-            # Flatten results since each task returns a list of dimension results
-            for result_list in batch_results:
-                if isinstance(result_list, list):
-                    all_results.extend(result_list)
-                elif isinstance(result_list, Exception):
-                    logger.error(f"Batch task failed: {result_list}")
-            
-            # Small delay between batches to be respectful to the API
-            if i + batch_size < len(tasks):
-                await asyncio.sleep(0.5)
+
+        logger.info(f"Starting concurrent execution with semaphore (max {self.semaphore._value} concurrent)")
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Flatten results since each task returns a list of dimension results
+        for result_list in batch_results:
+            if isinstance(result_list, list):
+                all_results.extend(result_list)
+            elif isinstance(result_list, Exception):
+                logger.error(f"Task failed: {result_list}")
         
         # Convert to DataFrame
         df = pd.DataFrame(all_results)
